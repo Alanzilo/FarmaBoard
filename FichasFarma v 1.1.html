@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Updated features: sidebar toggle, note viewer, detail modal, and row highlights -->
 <html lang="es">
   <head>
     <meta charset="utf-8" />
@@ -343,6 +344,7 @@
             notas: '',
             quickNote: '',
             color: '',
+            highlight: '',
             tags: [],
           }
         );
@@ -393,6 +395,21 @@
                 onChange={handleChange}
                 className="w-full h-10 rounded-xl border dark:bg-gray-700 dark:border-gray-600"
               />
+            </div>
+
+            <div>
+              <label className="text-sm">Resaltado</label>
+              <select
+                name="highlight"
+                value={form.highlight || ''}
+                onChange={handleChange}
+                className="w-full px-3 py-2 rounded-xl border dark:bg-gray-700 dark:border-gray-600"
+              >
+                <option value="">Ninguno</option>
+                <option value="green">Verde</option>
+                <option value="yellow">Amarillo</option>
+                <option value="red">Rojo</option>
+              </select>
             </div>
 
             <div className="md:col-span-2">
@@ -469,7 +486,7 @@
         );
       }
 
-      function DrugTable({ drugs, onEdit, onDelete, onNote, colors }) {
+      function DrugTable({ drugs, onEdit, onDelete, onNote, onView, onViewNotes, colors }) {
         return (
           <div className="overflow-x-auto rounded-2xl border dark:border-gray-700">
             <table className="min-w-full text-sm">
@@ -486,15 +503,28 @@
               <tbody>
                 {drugs.map((d) => {
                   const c = getColor(d, colors);
+                  const highlightClass =
+                    d.highlight === 'green'
+                      ? 'border-b-4 border-green-400'
+                      : d.highlight === 'yellow'
+                        ? 'border-b-4 border-yellow-400'
+                        : d.highlight === 'red'
+                          ? 'border-b-4 border-red-400'
+                          : '';
                   return (
-                    <tr key={d.id} className="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700" style={c ? { borderLeft: `4px solid ${c}` } : {}}>
-                      <td className="p-3 font-medium">{d.nombre}</td>
+                    <tr key={d.id} className={`border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 ${highlightClass}`} style={c ? { borderLeft: `4px solid ${c}` } : {}}>
+                      <td className="p-3 font-medium">
+                        <button className="text-left underline text-blue-600" onClick={() => onView(d)}>
+                          {d.nombre}
+                        </button>
+                      </td>
                       <td className="p-3">{d.familia}</td>
                       <td className="p-3">{d.subfamilia}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <span className="truncate max-w-[120px]">{d.quickNote || ''}</span>
                           <Button onClick={() => onNote(d)} className="px-2 py-1">✎</Button>
+                          <Button onClick={() => onViewNotes(d)} className="px-2 py-1">👁</Button>
                         </div>
                       </td>
                       <td className="p-3">
@@ -546,6 +576,56 @@
         if (field === 'farmacocinetica') return drug.farmacocinetica || '';
         if (field === 'tags') return (drug.tags || []).join(', ');
         return drug[field] || '';
+      }
+
+      function NotesViewer({ drug, onClose }) {
+        return (
+          <Modal
+            open={!!drug}
+            onClose={onClose}
+            title={drug ? `Notas: ${drug.nombre}` : ''}
+            footer={<Button onClick={onClose}>Cerrar</Button>}
+          >
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {drug?.notas && (
+                <div>
+                  <h4 className="font-medium mb-1">Notas</h4>
+                  <div className="whitespace-pre-wrap">{drug.notas}</div>
+                </div>
+              )}
+              {drug?.quickNote && (
+                <div>
+                  <h4 className="font-medium mb-1">Nota rápida</h4>
+                  <div className="whitespace-pre-wrap">{drug.quickNote}</div>
+                </div>
+              )}
+              {!drug?.notas && !drug?.quickNote && (
+                <div className="text-sm text-gray-500">Sin notas.</div>
+              )}
+            </div>
+          </Modal>
+        );
+      }
+
+      function DrugDetailsModal({ drug, onClose }) {
+        const fields = React.useMemo(() => DEFAULT_FIELDS.filter(f => f !== 'nombre'), []);
+        return (
+          <Modal
+            open={!!drug}
+            onClose={onClose}
+            title={drug ? drug.nombre : ''}
+            footer={<Button onClick={onClose}>Cerrar</Button>}
+          >
+            <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+              {fields.map((f) => (
+                <div key={f}>
+                  <div className="text-xs text-gray-400 dark:text-gray-500">{FIELD_LABEL[f] || f}</div>
+                  <div className="whitespace-pre-wrap">{drug ? renderField(drug, f) : ''}</div>
+                </div>
+              ))}
+            </div>
+          </Modal>
+        );
       }
 
       function FlashSide({ drug, fields, sideLabel }) {
@@ -706,10 +786,11 @@
         );
       }
 
-      function Topbar({ onAdd, onImport, onExport, onSettings, search, setSearch, view, setView }) {
+      function Topbar({ onAdd, onImport, onExport, onSettings, search, setSearch, view, setView, onToggleSidebar, sidebarCollapsed }) {
         return (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
+              <Button onClick={onToggleSidebar}>{sidebarCollapsed ? 'Mostrar menú' : 'Ocultar menú'}</Button>
               <Input
                 placeholder="Buscar por nombre, mecanismo o etiqueta…"
                 value={search}
@@ -802,6 +883,9 @@
         const [modalOpen, setModalOpen] = React.useState(false);
         const [editing, setEditing] = React.useState(null);
         const [noteEditing, setNoteEditing] = React.useState(null);
+        const [viewingDrug, setViewingDrug] = React.useState(null);
+        const [notesViewing, setNotesViewing] = React.useState(null);
+        const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
 
         const [settingsOpen, setSettingsOpen] = React.useState(false);
 
@@ -865,17 +949,19 @@
               </div>
             </header>
 
-            <main className="grid grid-cols-1 lg:grid-cols-[280px,1fr] max-w-6xl mx-auto w-full gap-4 p-3 sm:p-4">
-              <div className="rounded-2xl border bg-white dark:bg-gray-800 dark:border-gray-700">
-                <Sidebar
-                  drugs={db}
-                  selected={filter}
-                  onSelect={(sel) => setFilter(sel)}
-                  onClear={() => setFilter({ family: null, subfamily: null })}
-                  colors={colors}
-                  setColors={setColors}
-                />
-              </div>
+            <main className={`grid ${sidebarCollapsed ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-[280px,1fr]'} max-w-6xl mx-auto w-full gap-4 p-3 sm:p-4`}>
+              {!sidebarCollapsed && (
+                <div className="rounded-2xl border bg-white dark:bg-gray-800 dark:border-gray-700">
+                  <Sidebar
+                    drugs={db}
+                    selected={filter}
+                    onSelect={(sel) => setFilter(sel)}
+                    onClear={() => setFilter({ family: null, subfamily: null })}
+                    colors={colors}
+                    setColors={setColors}
+                  />
+                </div>
+              )}
 
               <div className="space-y-4">
                 <div className="rounded-2xl border bg-white dark:bg-gray-800 dark:border-gray-700 p-3 sm:p-4">
@@ -888,6 +974,8 @@
                     setSearch={setSearch}
                     view={view}
                     setView={setView}
+                    onToggleSidebar={() => setSidebarCollapsed((s) => !s)}
+                    sidebarCollapsed={sidebarCollapsed}
                   />
                 </div>
 
@@ -898,6 +986,8 @@
                       onEdit={(d) => { setEditing(d); setModalOpen(true); }}
                       onDelete={deleteDrug}
                       onNote={(d) => setNoteEditing(d)}
+                      onView={(d) => setViewingDrug(d)}
+                      onViewNotes={(d) => setNotesViewing(d)}
                       colors={colors}
                     />
                   )}
@@ -953,6 +1043,9 @@
                 </div>
               </div>
             </Modal>
+
+            <NotesViewer drug={notesViewing} onClose={() => setNotesViewing(null)} />
+            <DrugDetailsModal drug={viewingDrug} onClose={() => setViewingDrug(null)} />
 
             <footer className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">Hecho para clases de Farmacología • Modo offline</footer>
           </div>
